@@ -1,0 +1,56 @@
+name: RDP Tunnel
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [rdp]
+
+jobs:
+  rdp:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GH_TOKEN }}
+
+    - name: 🔐 Enable RDP
+      shell: pwsh
+      run: |
+        Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server' -Name 'fDenyTSConnections' -Value 0 -Force
+        Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+        Write-Host "✅ RDP Enabled"
+
+    - name: 📥 Download Cloudflared
+      shell: pwsh
+      run: |
+        Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "cloudflared.exe"
+        Write-Host "✅ Cloudflared Downloaded"
+
+    - name: 🌐 Start RDP Tunnel
+      shell: pwsh
+      run: |
+        Start-Process -FilePath "cloudflared.exe" -ArgumentList "tunnel --url rdp://localhost:3389 --no-autoupdate" -RedirectStandardOutput "rdp.log" -WindowStyle Hidden
+        Start-Sleep -Seconds 45
+        
+        $content = Get-Content "rdp.log" -Raw
+        if ($content -match 'https://[a-zA-Z0-9-]+\.trycloudflare\.com') {
+          $url = $matches[0]
+          Write-Host "✅ RDP URL: $url"
+          $url | Out-File -FilePath "rdp-link.txt" -NoNewline
+        }
+
+    - name: 💾 Commit RDP Link
+      shell: pwsh
+      run: |
+        git config --global user.email "bot@github.com"
+        git config --global user.name "Bot"
+        git add rdp-link.txt
+        git commit -m "📱 RDP Link" --allow-empty || true
+        git push
+
+    - name: ⏰ Keep Alive (5.5 hours)
+      run: Start-Sleep -Seconds 19800
